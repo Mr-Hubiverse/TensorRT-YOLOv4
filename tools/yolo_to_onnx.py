@@ -742,5 +742,7 @@ def main():
     del builder
     onnx.save(model_def,arg.out)
 
+    onnx.save(model_def, args.out, opset_version=11)
+
 if __name__ == '__main__':
     main()
