@@ -652,7 +652,6 @@ class GraphBuilderONNX(object):
             upsample_node = helper.make_node(
                 'Upsample',
                 mode='nearest',
-                # For ONNX versions <0.7.0, Upsample nodes accept different parameters than 'scales':
                 scales=[1.0, 1.0, upsample_factor, upsample_factor],
                 inputs=inputs,
                 outputs=[layer_name],
@@ -683,47 +682,59 @@ class GraphBuilderONNX(object):
             kernel_shape=[size, size],
             strides=[stride, stride],
             pads=[padding,padding,padding + (1 if (size-1)%2 else 0),padding + (1 if (size-1)%2 else 0)],
-            #auto_pad = 'SAME_LOWER',
             name=layer_name)
         self._nodes.append(max_pool_node)
         return layer_name, channels
 
-    def _make_yolo_node(self, layer_name, layer_dict):
-        """Create an ONNX Upsample node with the properties from
-        the DarkNet-based graph.
+def _make_yolo_node(self, layer_name, layer_dict):
+    """Create an ONNX-compatible YOLO node based on the DarkNet configuration.
 
-        Keyword arguments:
-        layer_name -- the layer's name (also the corresponding key in layer_configs)
-        layer_dict -- a layer parameter dictionary (one element of layer_configs)
-        """
-        anchors = np.array(eval(layer_dict['anchors'])).reshape([-1,2])
-        down_stride = int(layer_dict['down_stride'])
-        classes = int(layer_dict['classes'])
-        mask = list(eval(layer_dict['mask']))
-        anchors = anchors[mask].reshape(-1).tolist()
-        anhor_num = len(anchors)//2
-        thresh = float(layer_dict['infer_thresh'])
-        param = {'anchors':anchors,'classes':classes,'down_stride':down_stride,'anchor_num':anhor_num,"infer_thresh":thresh}
-        previous_node_specs = self._get_previous_node_specs()
-        inputs = [previous_node_specs.name]
-        channels = previous_node_specs.channels
-        assert channels > 0
-        yolo_node = onnx.helper.make_node(
-            'YOLO',
-            inputs=inputs,
-            outputs=[layer_name],
-            name=layer_name,
-            **param)
-        dim = self.input_tensor.type.tensor_type.shape.dim
-        batch,height,width =dim[0].dim_value, dim[2].dim_value//down_stride,dim[3].dim_value//down_stride
-        output_dims = [batch*height*width*anhor_num + 1,6]
-        output_tensor = helper.make_tensor_value_info(
-            layer_name, TensorProto.FLOAT, output_dims)
-        self.ouput_tensors.append(output_tensor)
-        self._nodes.append(yolo_node)
-        return layer_name, channels
+    Keyword arguments:
+    layer_name -- the layer's name (also the corresponding key in layer_configs)
+    layer_dict -- a layer parameter dictionary (one element of layer_configs)
+    """
+    anchors = np.array(eval(layer_dict['anchors'])).reshape([-1, 2])
+    down_stride = int(layer_dict['down_stride'])
+    classes = int(layer_dict['classes'])
+    mask = list(eval(layer_dict['mask']))
+    anchors = anchors[mask].reshape(-1).tolist()
+    anchor_num = len(anchors) // 2
+    infer_thresh = float(layer_dict['infer_thresh'])
 
+    param = {
+        'anchors': anchors,
+        'classes': classes,
+        'down_stride': down_stride,
+        'anchor_num': anchor_num,
+        'infer_thresh': infer_thresh
+    }
 
+    previous_node_specs = self._get_previous_node_specs()
+    inputs = [previous_node_specs.name]
+    channels = previous_node_specs.channels
+    assert channels > 0
+
+    dim = self.input_tensor.type.tensor_type.shape.dim
+    batch, height, width = dim[0].dim_value, dim[2].dim_value // down_stride, dim[3].dim_value // down_stride
+    output_dims = [batch * height * width * anchor_num + 1, 6]
+
+    output_tensor = helper.make_tensor_value_info(layer_name, TensorProto.FLOAT, output_dims)
+    self.ouput_tensors.append(output_tensor)
+
+    yolo_node = onnx.helper.make_node(
+        'YOLO',
+        inputs=inputs,
+        outputs=[layer_name],
+        name=layer_name,
+        anchors=anchors,
+        classes=classes,
+        down_stride=down_stride,
+        anchor_num=anchor_num,
+        infer_thresh=infer_thresh
+    )
+
+    self._nodes.append(yolo_node)
+    return layer_name, channels
 
 def main():
     argparse = ArgumentParser()
