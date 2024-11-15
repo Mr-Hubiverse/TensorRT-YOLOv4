@@ -622,43 +622,53 @@ class GraphBuilderONNX(object):
             self._nodes.append(route_node)
         return layer_name, channels
 
-    def _make_upsample_node(self, layer_name, layer_dict):
-        """Create an ONNX Upsample node with the properties from
-        the DarkNet-based graph.
+def _make_upsample_node(self, layer_name, layer_dict):
+    """Create an ONNX Upsample node with the properties from
+    the DarkNet-based graph.
 
-        Keyword arguments:
-        layer_name -- the layer's name (also the corresponding key in layer_configs)
-        layer_dict -- a layer parameter dictionary (one element of layer_configs)
-        layer_dict -- a layer parameter dictionary (one element of layer_configs)
-        """
-        upsample_factor = float(layer_dict['stride'])
-        previous_node_specs = self._get_previous_node_specs()
-        inputs = [previous_node_specs.name]
-        channels = previous_node_specs.channels
-        assert channels > 0
-        if onnx.__version__ >= '1.4.1':
-            scales = 'scales_' + layer_name[:3]
-            inputs = inputs + [scales]
-            upsample_node = helper.make_node(
-                'Upsample',
-                mode='nearest',
-                inputs=inputs,
-                outputs=[layer_name],
-                name=layer_name,
-            )
-            self.param_dict[layer_name] = dict(name = scales,param = [1.0, 1.0, upsample_factor, upsample_factor])
-            self._nodes.append(upsample_node)
-        else:
-            upsample_node = helper.make_node(
-                'Upsample',
-                mode='nearest',
-                scales=[1.0, 1.0, upsample_factor, upsample_factor],
-                inputs=inputs,
-                outputs=[layer_name],
-                name=layer_name,
-            )
-            self._nodes.append(upsample_node)
-        return layer_name, channels
+    Keyword arguments:
+    layer_name -- the layer's name (also the corresponding key in layer_configs)
+    layer_dict -- a layer parameter dictionary (one element of layer_configs)
+    """
+    upsample_factor = float(layer_dict['stride'])
+    previous_node_specs = self._get_previous_node_specs()
+    inputs = [previous_node_specs.name]
+    channels = previous_node_specs.channels
+    assert channels > 0
+
+    if onnx.__version__ >= '1.4.1':
+        scales_name = f"{layer_name}_scales"
+        scales_tensor = helper.make_tensor(
+            scales_name,
+            TensorProto.FLOAT,
+            [4],
+            [1.0, 1.0, upsample_factor, upsample_factor]
+        )
+        inputs.append(scales_name)
+
+        upsample_node = helper.make_node(
+            'Upsample',
+            mode='nearest',
+            inputs=inputs,
+            outputs=[layer_name],
+            name=layer_name,
+        )
+
+        self.param_dict[layer_name] = dict(name=scales_name, param=[1.0, 1.0, upsample_factor, upsample_factor])
+        self._nodes.append(upsample_node)
+        self._nodes.append(scales_tensor)
+    else:
+        upsample_node = helper.make_node(
+            'Upsample',
+            mode='nearest',
+            scales=[1.0, 1.0, upsample_factor, upsample_factor],
+            inputs=inputs,
+            outputs=[layer_name],
+            name=layer_name,
+        )
+        self._nodes.append(upsample_node)
+
+    return layer_name, channels
 
     def _make_maxpool_node(self, layer_name, layer_dict):
         """Create an ONNX Upsample node with the properties from
